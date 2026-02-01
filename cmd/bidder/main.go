@@ -17,7 +17,8 @@ type AssignedOrder struct {
 }
 
 type Cluster struct {
-	IP string
+	IP       string
+	Password string
 }
 
 var (
@@ -42,8 +43,23 @@ func mustLoadEnv() {
 		log.Fatal("CLUSTER_IPS env var is required")
 	}
 
-	for _, ip := range strings.Split(ips, ",") {
-		clusters = append(clusters, Cluster{IP: strings.TrimSpace(ip)})
+	ipList := strings.Split(ips, ",")
+
+	passwords := os.Getenv("SSH_PASSWORDS")
+	var passList []string
+	if passwords != "" {
+		passList = strings.Split(passwords, ",")
+		if len(passList) != len(ipList) {
+			log.Fatalf("SSH_PASSWORDS has %d entries but CLUSTER_IPS has %d — must match", len(passList), len(ipList))
+		}
+	}
+
+	for i, ip := range ipList {
+		c := Cluster{IP: strings.TrimSpace(ip)}
+		if len(passList) > 0 {
+			c.Password = strings.TrimSpace(passList[i])
+		}
+		clusters = append(clusters, c)
 	}
 
 	prover1Endpoint = os.Getenv("PROVER1_ENDPOINT")
@@ -59,22 +75,32 @@ func mustLoadEnv() {
 	}
 }
 
-func sshDockerCompose(clusterIP, folder, action string) error {
-	cmd := fmt.Sprintf("cd %s && docker compose %s", folder, action)
+func sshDockerCompose(cluster Cluster, folder, action string) error {
+	remoteCmd := fmt.Sprintf("cd %s && docker compose %s", folder, action)
 
-	sshCmd := exec.Command(
-		"ssh",
-		fmt.Sprintf("%s@%s", sshUser, clusterIP),
-		cmd,
-	)
+	var sshCmd *exec.Cmd
+	if cluster.Password != "" {
+		sshCmd = exec.Command(
+			"sshpass", "-p", cluster.Password,
+			"ssh", "-o", "StrictHostKeyChecking=no",
+			fmt.Sprintf("%s@%s", sshUser, cluster.IP),
+			remoteCmd,
+		)
+	} else {
+		sshCmd = exec.Command(
+			"ssh",
+			fmt.Sprintf("%s@%s", sshUser, cluster.IP),
+			remoteCmd,
+		)
+	}
 
 	out, err := sshCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("[%s] docker compose %s failed: %v\n%s",
-			clusterIP, action, err, out)
+			cluster.IP, action, err, out)
 	}
 
-	log.Printf("[%s] docker compose %s (%s)", clusterIP, action, folder)
+	log.Printf("[%s] docker compose %s (%s)", cluster.IP, action, folder)
 	return nil
 }
 
@@ -100,8 +126,8 @@ func switchProver(target int) {
 		go func(cluster Cluster) {
 			defer wg.Done()
 
-			_ = sshDockerCompose(cluster.IP, proverFolders[other], "stop")
-			_ = sshDockerCompose(cluster.IP, proverFolders[target], "start")
+			_ = sshDockerCompose(cluster, proverFolders[other], "stop")
+			_ = sshDockerCompose(cluster, proverFolders[target], "start")
 		}(c)
 	}
 
@@ -130,11 +156,11 @@ func splitProvers() {
 			defer wg.Done()
 
 			if idx < mid {
-				_ = sshDockerCompose(cluster.IP, proverFolders[2], "stop")
-				_ = sshDockerCompose(cluster.IP, proverFolders[1], "start")
+				_ = sshDockerCompose(cluster, proverFolders[2], "stop")
+				_ = sshDockerCompose(cluster, proverFolders[1], "start")
 			} else {
-				_ = sshDockerCompose(cluster.IP, proverFolders[1], "stop")
-				_ = sshDockerCompose(cluster.IP, proverFolders[2], "start")
+				_ = sshDockerCompose(cluster, proverFolders[1], "stop")
+				_ = sshDockerCompose(cluster, proverFolders[2], "start")
 			}
 		}(i, c)
 	}
