@@ -32,9 +32,10 @@ var (
 	currentActiveProver = 0
 	splitMode           = false
 	mu                  sync.Mutex
-	clusters            []Cluster
-	prover1Endpoint     string
-	prover2Endpoint     string
+	clusters        []Cluster
+	apiEndpoint     string
+	prover1Address  string
+	prover2Address  string
 )
 
 func mustLoadEnv() {
@@ -62,11 +63,12 @@ func mustLoadEnv() {
 		clusters = append(clusters, c)
 	}
 
-	prover1Endpoint = os.Getenv("PROVER1_ENDPOINT")
-	prover2Endpoint = os.Getenv("PROVER2_ENDPOINT")
+	apiEndpoint = os.Getenv("API_ENDPOINT")
+	prover1Address = os.Getenv("PROVER1_ADDRESS")
+	prover2Address = os.Getenv("PROVER2_ADDRESS")
 
-	if prover1Endpoint == "" || prover2Endpoint == "" {
-		log.Fatal("PROVER1_ENDPOINT and PROVER2_ENDPOINT must be set")
+	if apiEndpoint == "" || prover1Address == "" || prover2Address == "" {
+		log.Fatal("API_ENDPOINT, PROVER1_ADDRESS, and PROVER2_ADDRESS must be set")
 	}
 
 	sshUser = os.Getenv("SSH_USER")
@@ -194,8 +196,8 @@ func main() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		order1, err1 := checkOrder(prover1Endpoint)
-		order2, err2 := checkOrder(prover2Endpoint)
+		order1, err1 := checkOrder(apiEndpoint + "?prover=" + prover1Address)
+		order2, err2 := checkOrder(apiEndpoint + "?prover=" + prover2Address)
 
 		if err1 != nil || err2 != nil {
 			log.Printf(
